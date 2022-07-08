@@ -5,6 +5,9 @@ const multiparty = require('multiparty')
 
 const server = http.createServer()
 
+/// 提取后缀名
+const extractExt = filename => filename.slice(filename.lastIndexOf('.'), filename.length)
+
 /// 大文件存储目录
 const UPLOAD_DIR = path.resolve(__dirname, '..', 'target')
 
@@ -22,7 +25,7 @@ const resolvePost = req => {
 
 /// 写入文件流
 const pipeStream = (path, writeStream) => {
-  new Promise(resolve => {
+  return new Promise(resolve => {
     const readStream = fse.createReadStream(path)
     readStream.on('end', () => {
       fse.unlinkSync(path)
@@ -34,14 +37,15 @@ const pipeStream = (path, writeStream) => {
 
 /// 合并切片
 const mergeFileChunk = async (filePath, filename, size) => {
-  const chunkDir = path.resolve(UPLOAD_DIR, 'chunkDir' + filename)
+  const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename.split('.')[0])
   const chunkPaths = await fse.readdir(chunkDir)
+  console.log('chunkPaths: ', chunkPaths)
 
   chunkPaths.sort((a, b) => a.split('-')[1] - b.split('-')[1])
 
   /// 并发写入文件
   await Promise.all(chunkPaths.map((chunkPath, index) => {
-    pipeStream(
+    return pipeStream(
       path.resolve(chunkDir, chunkPath),
       fse.createWriteStream(filePath, {
         start: index * size
@@ -49,7 +53,8 @@ const mergeFileChunk = async (filePath, filename, size) => {
     )
   }))
 
-  // fse.rmdirSync(chunkDir)
+  console.log('chunkDir: ', chunkDir)
+  fse.rmdirSync(chunkDir)
 }
 
 server.on('request', async (req, res) => {
@@ -61,6 +66,17 @@ server.on('request', async (req, res) => {
     return
   }
 
+  if (req.url === '/verify') {
+    const data = resolvePost(req)
+    const { filename, hash } = data
+    const ext = extractExt(filename)
+    const filePath = path.resolve(UPLOAD_DIR, `${hash}${ext}`)
+    if (fse.existsSync(filePath)) {
+      res.end(JSON.stringify({ shouldUpdate: false }))
+    } else {
+      res.end(JSON.stringify({ shouldUpdate: true }))
+    }
+  }
 
   if (req.url === '/merge') {
     const data = await resolvePost(req)
@@ -84,7 +100,7 @@ server.on('request', async (req, res) => {
       const [hash] = fields.hash
       const [filename] = fields.filename
 
-      const chunkDir = path.resolve(UPLOAD_DIR, 'chunkDir' + filename)
+      const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename.split('.')[0])
       if (!fse.existsSync(chunkDir)) {
         await fse.mkdirs(chunkDir)
       }
