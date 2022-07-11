@@ -2,6 +2,7 @@
   <div>
     <input type="file" @change="handleFileChange" />
     <el-button @click="handleUpload">upload</el-button>
+    <el-button @click="pause">pause</el-button>
     <div>
       <div>Total</div>
       <el-progress :percentage="uploadPercentage"></el-progress>
@@ -24,7 +25,6 @@
 </template>
 
 <script>
-import { request } from '../../utils/request'
 
 /// 切片大小
 const SIZE = 1 * 1024 * 1024
@@ -39,6 +39,7 @@ export default {
       },
       data: [],
       hashPercentage: 0,
+      requestList: [],
     }
   },
   computed: {
@@ -51,9 +52,40 @@ export default {
     }
   },
   methods: {
-    /// 文件修改
+    pause() {
+      this.requestList.forEach(xhr => xhr?.abort())
+      this.requestList.length = 0
+    },
+
+    request({
+      url,
+      method = 'post',
+      data,
+      onProgress = e => e,
+      headers = {},
+    }) {
+      return new Promise(res => {
+        const xhr = new XMLHttpRequest()
+        xhr.upload.onprogress = onProgress
+        xhr.open(method, url)
+        Object.keys(headers).forEach(key => {
+          xhr.setRequestHeader(key, headers[key])
+        })
+        xhr.send(data)
+        xhr.onload = e => {
+          if (this.requestList.length) {
+            const xhrIndex = this.requestList.findIndex(item => item === xhr)
+            this.requestList.splice(xhrIndex, 1)
+          }
+          res({ data: e.target.response })
+        }
+
+        this.requestList.push(xhr)
+      })
+    },
+
+    /// 上传文件
     handleFileChange(e) {
-      console.log('e.target.files: ', e.target.files)
       const [file] = e.target.files
       if (!file) return
       this.container.file = file
@@ -61,27 +93,25 @@ export default {
     /// 点击上传
     async handleUpload() {
       if (!this.container.file) return
+      // 获取 chunk 数组
       const fileChunkList = this.createFileChunk(this.container.file)
-      console.log('fileChunkList: ', fileChunkList)
       /// 获取哈希
       this.container.hash = await this.calculatorHash(fileChunkList)
-      console.log('this.container.hash: ', this.container.hash)
-
+      // 秒传验证
       const { shouldUpload } = await this.verifyUpload(this.container.file.name, this.container.hash)
-
       if (!shouldUpload) {
         this.$message.success('skip upload：file upload success')
         return
       }
+
+      // 获取数组信息
       this.data = fileChunkList.map(({ file }, index) => ({
         chunk: file,
         hash: this.container.hash + '-' + index,
         index,
         size: file.size,
-        // hash: this.container.file.name + "-" + index,
-        percentage: 0
+        percentage: 0,
       }))
-      console.log('this.data: ', this.data)
       await this.uploadChunks()
     },
 
@@ -93,46 +123,6 @@ export default {
         cur += size
       }
       return fileChunkList
-    },
-
-    async uploadChunks() {
-      const requestList = this.data
-        .map(({ chunk, hash, index }) => {
-          const formData = new FormData()
-          formData.append('chunk', chunk)
-          formData.append('hash', hash)
-          formData.append('filename', this.container.file.name)
-          return { formData, index }
-        })
-        .map(({ formData, index }) => {
-          return request({
-            url: 'http://localhost:3000',
-            data: formData,
-            onProgress: this.createProgressHandler(this.data[index])
-          })
-        })
-
-      await Promise.all(requestList)
-      await this.mergeRequest()
-    },
-
-    async mergeRequest() {
-      await request({
-        url: 'http://localhost:3000/merge',
-        headers: {
-          'content-type': 'application/json'
-        },
-        data: JSON.stringify({
-          size: SIZE,
-          filename: this.container.file.name
-        })
-      })
-    },
-
-    createProgressHandler(item) {
-      return e => {
-        item.percentage = parseInt(String(e.loaded / e.total) * 100)
-      }
     },
 
     calculatorHash(fileChunkList) {
@@ -150,7 +140,7 @@ export default {
     },
 
     async verifyUpload(filename, hash) {
-      const { data } = await request({
+      const { data } = await this.request({
         url: 'http://localhost:3000/verify',
         headers: {
           'content-type': 'application/json',
@@ -161,8 +151,51 @@ export default {
         })
       })
       return JSON.parse(data)
-    }
+    },
+
+    async uploadChunks() {
+      const requestList = this.data
+        .map(({ chunk, hash, index }) => {
+          const formData = new FormData()
+          formData.append('chunk', chunk)
+          formData.append('hash', hash)
+          formData.append('filename', this.container.file.name)
+          return { formData, index }
+        })
+        .map(({ formData, index }) => {
+          return this.request({
+            url: 'http://localhost:3000',
+            data: formData,
+            onProgress: this.createProgressHandler(this.data[index])
+          })
+        })
+
+      await Promise.all(requestList)
+      await this.mergeRequest()
+    },
+
+    async mergeRequest() {
+      await this.request({
+        url: 'http://localhost:3000/merge',
+        headers: {
+          'content-type': 'application/json'
+        },
+        data: JSON.stringify({
+          size: SIZE,
+          hash: this.container.hash,
+          filename: this.container.file.name,
+        })
+      })
+    },
+
+    createProgressHandler(item) {
+      return e => {
+        item.percentage = parseInt(String(e.loaded / e.total) * 100)
+      }
+    },
+
   },
+
 }
 </script>
 

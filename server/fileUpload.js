@@ -37,9 +37,10 @@ const pipeStream = (path, writeStream) => {
 
 /// 合并切片
 const mergeFileChunk = async (filePath, filename, size) => {
-  const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename.split('.')[0])
+  const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename)
   const chunkPaths = await fse.readdir(chunkDir)
-  console.log('chunkPaths: ', chunkPaths)
+  // console.log('chunkDir: ', chunkDir)
+  // console.log('chunkPaths: ', chunkPaths)
 
   chunkPaths.sort((a, b) => a.split('-')[1] - b.split('-')[1])
 
@@ -53,7 +54,6 @@ const mergeFileChunk = async (filePath, filename, size) => {
     )
   }))
 
-  console.log('chunkDir: ', chunkDir)
   fse.rmdirSync(chunkDir)
 }
 
@@ -67,22 +67,21 @@ server.on('request', async (req, res) => {
   }
 
   if (req.url === '/verify') {
-    const data = resolvePost(req)
+    const data = await resolvePost(req)
     const { filename, hash } = data
-    const ext = extractExt(filename)
-    const filePath = path.resolve(UPLOAD_DIR, `${hash}${ext}`)
+    const filePath = path.resolve(UPLOAD_DIR, `${hash}_${filename}`)
+    // console.log('filePath: ', filePath)
     if (fse.existsSync(filePath)) {
-      res.end(JSON.stringify({ shouldUpdate: false }))
+      res.end(JSON.stringify({ shouldUpload: false }))
     } else {
-      res.end(JSON.stringify({ shouldUpdate: true }))
+      res.end(JSON.stringify({ shouldUpload: true }))
     }
   }
 
   if (req.url === '/merge') {
     const data = await resolvePost(req)
-    console.log('merge - data: ', data)
-    const { filename, size } = data
-    const filePath = path.resolve(UPLOAD_DIR, `${filename}`)
+    const { filename, size, hash } = data
+    const filePath = path.resolve(UPLOAD_DIR, `${hash}_${filename}`)
     await mergeFileChunk(filePath, filename, size)
     res.end(
       JSON.stringify({
@@ -100,7 +99,8 @@ server.on('request', async (req, res) => {
       const [hash] = fields.hash
       const [filename] = fields.filename
 
-      const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename.split('.')[0])
+      const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename)
+      /// 如果没有文件夹，创建一个
       if (!fse.existsSync(chunkDir)) {
         await fse.mkdirs(chunkDir)
       }
