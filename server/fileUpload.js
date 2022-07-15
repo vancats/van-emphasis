@@ -11,6 +11,17 @@ const extractExt = filename => filename.slice(filename.lastIndexOf('.'), filenam
 /// 大文件存储目录
 const UPLOAD_DIR = path.resolve(__dirname, '..', 'target')
 
+///
+const getChunkDir = filename => path.resolve(UPLOAD_DIR, 'chunk_' + filename)
+
+/// 获取已上传的 hash 数组
+const createUploadedList = async filename => {
+  const chunkDir = getChunkDir(filename)
+  return fse.existsSync(chunkDir)
+    ? await fse.readdir(chunkDir)
+    : []
+}
+
 const resolvePost = req => {
   return new Promise(resolve => {
     let chunk = ''
@@ -37,7 +48,8 @@ const pipeStream = (path, writeStream) => {
 
 /// 合并切片
 const mergeFileChunk = async (filePath, filename, size) => {
-  const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename)
+  const chunkDir = getChunkDir(filename)
+
   const chunkPaths = await fse.readdir(chunkDir)
   // console.log('chunkDir: ', chunkDir)
   // console.log('chunkPaths: ', chunkPaths)
@@ -53,8 +65,12 @@ const mergeFileChunk = async (filePath, filename, size) => {
       })
     )
   }))
-
-  fse.rmdirSync(chunkDir)
+  console.log('--------------')
+  const paths = await fse.readdir(chunkDir)
+  console.log(paths)
+  if (paths && paths.length === 0) {
+    fse.rmdirSync(chunkDir)
+  }
 }
 
 server.on('request', async (req, res) => {
@@ -74,7 +90,10 @@ server.on('request', async (req, res) => {
     if (fse.existsSync(filePath)) {
       res.end(JSON.stringify({ shouldUpload: false }))
     } else {
-      res.end(JSON.stringify({ shouldUpload: true }))
+      res.end(JSON.stringify({
+        shouldUpload: true,
+        uploadedList: await createUploadedList(filename)
+      }))
     }
   }
 
@@ -99,7 +118,7 @@ server.on('request', async (req, res) => {
       const [hash] = fields.hash
       const [filename] = fields.filename
 
-      const chunkDir = path.resolve(UPLOAD_DIR, 'chunk_' + filename)
+      const chunkDir = getChunkDir(filename)
       /// 如果没有文件夹，创建一个
       if (!fse.existsSync(chunkDir)) {
         await fse.mkdirs(chunkDir)

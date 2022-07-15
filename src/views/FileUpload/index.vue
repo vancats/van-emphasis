@@ -1,11 +1,27 @@
 <template>
-  <div>
-    <input type="file" @change="handleFileChange" />
-    <el-button @click="handleUpload">upload</el-button>
-    <el-button @click="pause">pause</el-button>
+  <div style="padding: 0 200px">
+    <div style="margin-bottom: 10px">
+      <el-input v-model="size" style="width: 400px" placeholder="请选择切片大小" />
+      <el-button @click="changeSize">{{ sizeName[sizeLevel] }}</el-button>
+    </div>
+    <div>当前切片大小是 {{ SIZE / 1024}} KB</div>
+
+    <input
+      type="file"
+      ref="file"
+      @change="handleFileChange"
+      style="opacity: 0; position: absolute; left : 1200px"
+    />
+    <el-button @click="trigger">获取文件</el-button>
+    <el-button @click="handleUpload">上传文件</el-button>
+    <template v-if="isUploading">
+      <el-button v-if="!isPause" @click="handlePause">暂停上传</el-button>
+      <el-button v-else @click="handleResume">继续上传</el-button>
+    </template>
+    <div style="margin-bottom: 20px">{{ container.file && container.file.name }}</div>
     <div>
-      <div>Total</div>
-      <el-progress :percentage="uploadPercentage"></el-progress>
+      <div>总进度</div>
+      <el-progress :percentage="fakeUploadPercentage"></el-progress>
       <div class="percentage">
         <span>chunkhash</span>
         <span>size(KB)</span>
@@ -14,7 +30,7 @@
       <div v-for="item in data" :key="item.index">
         <div class="percentage">
           <div>{{ item.hash }}</div>
-          <div>{{ item.size }}</div>
+          <div>{{ (item.size / 1024).toFixed(2) }}</div>
           <div style="width: 300px">
             <el-progress :percentage="item.percentage"></el-progress>
           </div>
@@ -27,11 +43,12 @@
 <script>
 
 /// 切片大小
-const SIZE = 1 * 1024 * 1024
-
 export default {
   data() {
     return {
+      size: 1,
+      sizeLevel: 1,
+      sizeName: ['KB', 'MB', 'GB'],
       container: {
         file: null,
         hash: '',
@@ -40,6 +57,9 @@ export default {
       data: [],
       hashPercentage: 0,
       requestList: [],
+      isUploading: false,
+      isPause: false,
+      fakeUploadPercentage: 0,
     }
   },
   computed: {
@@ -49,12 +69,48 @@ export default {
         .map(item => item.size * item.percentage)
         .reduce((acc, cur) => acc + cur, 0)
       return parseInt((loaded / this.container.file.size).toFixed(2))
+    },
+    SIZE() {
+      return this.size * Math.pow(1024, this.sizeLevel + 1)
+    },
+  },
+  watch: {
+    uploadPercentage(newValue) {
+      if (newValue > this.fakeUploadPercentage) {
+        this.fakeUploadPercentage = newValue
+      }
     }
   },
   methods: {
-    pause() {
+    trigger() {
+      this.$refs.file.click()
+    },
+    changeSize() {
+      this.sizeLevel++
+      this.sizeLevel %= 3
+    },
+    handlePause() {
       this.requestList.forEach(xhr => xhr?.abort())
       this.requestList.length = 0
+      this.isPause = true
+    },
+
+    async handleResume() {
+      const { uploadedList } = await this.verifyUpload(this.container.file.name, this.container.hash)
+      this.isPause = false
+
+      const fileChunkList = this.createFileChunk(this.container.file)
+
+      // 获取数组信息
+      this.data = fileChunkList.map(({ file }, index) => ({
+        chunk: file,
+        hash: this.container.hash + '-' + index,
+        index,
+        size: file.size,
+        percentage: uploadedList.includes(this.container.hash + '-' + index) ? 100 : 0,
+      }))
+
+      await this.uploadChunks(uploadedList)
     },
 
     request({
@@ -90,6 +146,7 @@ export default {
       if (!file) return
       this.container.file = file
     },
+
     /// 点击上传
     async handleUpload() {
       if (!this.container.file) return
@@ -98,9 +155,9 @@ export default {
       /// 获取哈希
       this.container.hash = await this.calculatorHash(fileChunkList)
       // 秒传验证
-      const { shouldUpload } = await this.verifyUpload(this.container.file.name, this.container.hash)
+      const { shouldUpload, uploadedList } = await this.verifyUpload(this.container.file.name, this.container.hash)
       if (!shouldUpload) {
-        this.$message.success('skip upload：file upload success')
+        this.$message.success('文件已上传')
         return
       }
 
@@ -110,12 +167,12 @@ export default {
         hash: this.container.hash + '-' + index,
         index,
         size: file.size,
-        percentage: 0,
+        percentage: uploadedList.includes(index) ? 100 : 0,
       }))
       await this.uploadChunks()
     },
 
-    createFileChunk(file, size = SIZE) {
+    createFileChunk(file, size = this.SIZE) {
       const fileChunkList = []
       let cur = 0
       while (cur < file.size) {
@@ -153,8 +210,9 @@ export default {
       return JSON.parse(data)
     },
 
-    async uploadChunks() {
+    async uploadChunks(uploadedList = []) {
       const requestList = this.data
+        .filter(({ hash }) => !uploadedList.includes(hash))
         .map(({ chunk, hash, index }) => {
           const formData = new FormData()
           formData.append('chunk', chunk)
@@ -170,8 +228,14 @@ export default {
           })
         })
 
+      this.isUploading = true
       await Promise.all(requestList)
-      await this.mergeRequest()
+      if (uploadedList.length + requestList.length === this.data.length) {
+        await this.mergeRequest()
+        this.isUploading = false
+        this.$message.success('文件上传成功')
+        // this.data.length = 0
+      }
     },
 
     async mergeRequest() {
@@ -181,7 +245,7 @@ export default {
           'content-type': 'application/json'
         },
         data: JSON.stringify({
-          size: SIZE,
+          size: this.SIZE,
           hash: this.container.hash,
           filename: this.container.file.name,
         })
