@@ -1,12 +1,30 @@
 <template>
-  <div>虚拟列表咯</div>
+  <div class="virtual">
+    <VirtualList :listData="data" :itemSize="100" />
+  </div>
 </template>
 
 <script>
-export default {
-
+import VirtualList from './fixWidth.vue'
+let d = []
+for (let i = 0; i < 1000; i++) {
+  d.push({ id: i, value: i })
 }
+
+export default {
+  data() {
+    return {
+      data: d
+    }
+  },
+  components: {
+    VirtualList
+  }
+};
 </script>
 
-<style lang="less" scoped>
+<style>
+.virtual {
+  height: 90%;
+}
 </style>
