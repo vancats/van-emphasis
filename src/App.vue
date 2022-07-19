@@ -4,7 +4,6 @@
       <router-link to="/">Home</router-link>
       <router-link to="/file-upload">FileUpload</router-link>
       <router-link to="/virtual-list">VirtualList</router-link>
-      <router-link to="/dynamic-form">DynamicForm</router-link>
     </div>
     <router-view />
   </div>
