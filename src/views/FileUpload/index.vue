@@ -1,7 +1,7 @@
 <template>
   <div style="padding: 0 200px">
     <div style="margin-bottom: 10px">
-      <el-input v-model="size" style="width: 400px" placeholder="请选择切片大小" />
+      <el-input v-model="size" maxlength="8" style="width: 150px" placeholder="请选择切片大小" />
       <el-button @click="changeSize">{{ sizeName[sizeLevel] }}</el-button>
     </div>
     <div>当前切片大小是 {{ SIZE / 1024}} KB</div>

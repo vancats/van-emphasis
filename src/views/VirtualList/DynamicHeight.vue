@@ -8,7 +8,7 @@
         v-for="item in visibleData"
         :id="item._index"
         :key="item._index"
-      >{{ item.value }}</div>
+      >{{ item.id}} --- {{ item.value }}</div>
     </div>
   </div>
 </template>
